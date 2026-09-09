@@ -72,8 +72,6 @@ object NoteScribbleHook {
             "lasso" -> selectLasso(activity)
             "eraser_hold_down" -> onEraserHoldDown(activity)
             "eraser_hold_up" -> onEraserHoldUp(activity)
-            "lasso_hold_down" -> onLassoHoldDown(activity)
-            "lasso_hold_up" -> onLassoHoldUp(activity)
             else -> Log.w(TAG, "Unknown stylus command: $cmd")
         }
     }
@@ -183,14 +181,6 @@ object NoteScribbleHook {
     }
 
     private fun onEraserHoldUp(activity: Activity) {
-        selectPen(activity)
-    }
-
-    private fun onLassoHoldDown(activity: Activity) {
-        selectLasso(activity)
-    }
-
-    private fun onLassoHoldUp(activity: Activity) {
         selectPen(activity)
     }
 }

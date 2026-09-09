@@ -118,13 +118,6 @@ class InputEventDaemon(private val context: Context) {
                     sendCommandToStarNote("eraser_hold_up")
                 }
             }
-            ActionType.TOGGLE_LASSO_HOLD -> {
-                if (isDown) {
-                    sendCommandToStarNote("lasso_hold_down")
-                } else {
-                    sendCommandToStarNote("lasso_hold_up")
-                }
-            }
             ActionType.SELECT_PEN -> {
                 if (isDown) sendCommandToStarNote("pen")
             }

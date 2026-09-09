@@ -13,7 +13,7 @@ class KeyConfig(context: Context) {
         set(v) = prefs.edit().putString("pen_lower", v.id).apply()
 
     var penUpper: ActionType
-        get() = ActionType.fromId(prefs.getString("pen_upper", ActionType.TOGGLE_LASSO_HOLD.id)!!)
+        get() = ActionType.fromId(prefs.getString("pen_upper", ActionType.SELECT_LASSO.id)!!)
         set(v) = prefs.edit().putString("pen_upper", v.id).apply()
 
     // 系统开关
