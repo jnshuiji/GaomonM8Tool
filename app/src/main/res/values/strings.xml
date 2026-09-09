@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">高漫 M8 驱动工具</string>
+    <string name="xposed_description">高漫 M8 数位板 StarNote 画板底层原生驱动与快捷键增强模块</string>
+    <string name="status_connected">数位板已连接 (M8)</string>
+    <string name="status_disconnected">未检测到数位板</string>
+    <string name="service_running">守护服务运行中</string>
+    <string name="service_stopped">守护服务已停止</string>
+</resources>
