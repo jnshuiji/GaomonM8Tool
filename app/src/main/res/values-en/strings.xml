@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Gaomon M8 Tool</string>
+    <string name="app_title">Gaomon M8 Stylus Tool</string>
+    <string name="xposed_description">Gaomon M8 drawing tablet StarNote native driver and shortcut enhancement module</string>
+
+    <!-- Running Status Card -->
+    <string name="title_running_status">Running Status</string>
+    <string name="status_root_checking">Root Status: Checking...</string>
+    <string name="status_root_granted">Root Status: Granted</string>
+    <string name="status_root_denied">Root Status: Denied</string>
+
+    <string name="status_device_checking">Hardware Status: Checking...</string>
+    <string name="status_device_connected_format">Hardware Status: Connected (%s)</string>
+    <string name="status_device_connected">Hardware Status: Connected</string>
+    <string name="status_device_disconnected">Hardware Status: Disconnected</string>
+
+    <string name="status_lsposed_checking">LSPosed Module: Checking...</string>
+    <string name="status_lsposed_active">LSPosed Module: Active</string>
+    <string name="status_lsposed_inactive">LSPosed Module: Inactive</string>
+
+    <!-- Stylus Side Button Settings -->
+    <string name="title_pen_settings">Stylus Side Button Settings</string>
+    <string name="label_pen_lower">Lower Button:</string>
+    <string name="label_pen_upper">Upper Button:</string>
+
+    <!-- Action Options -->
+    <string name="action_none">No Action</string>
+    <string name="action_eraser_hold">Hold for Eraser, Release for Pen</string>
+    <string name="action_pen">Pen</string>
+    <string name="action_eraser">Eraser</string>
+    <string name="action_lasso">Lasso</string>
+
+    <!-- System Experience Enhancement -->
+    <string name="title_system_enhancement">System Experience</string>
+    <string name="label_keep_virtual_keyboard">Keep virtual keyboard when tablet is connected</string>
+
+    <!-- Foreground Service -->
+    <string name="service_running">Gaomon M8 driver is running</string>
+    <string name="service_stopped">Gaomon M8 driver stopped</string>
+    <string name="service_notification_channel">Gaomon M8 Driver Daemon</string>
+    <string name="service_notification_text">Listening for stylus button events</string>
+</resources>

@@ -34,3 +34,8 @@ app/build/
 # Keystore files
 *.jks
 *.keystore
+
+# Python & uv virtual environment
+.venv/
+__pycache__/
+*.pyc

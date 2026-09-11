@@ -2,8 +2,10 @@ package com.gaomon.m8.xposed
 
 import android.app.Activity
 import android.util.Log
+import android.view.KeyEvent
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
+import java.lang.reflect.Method
 
 class GaomonXposedModule : XposedModule() {
 
@@ -33,46 +35,78 @@ class GaomonXposedModule : XposedModule() {
 
         if (param.packageName != TARGET_PACKAGE) return
 
-        log(Log.INFO, TAG, "StarNote package ready, installing Gaomon M8 hooks...")
+        log(Log.INFO, TAG, "StarNote package ready, installing Gaomon M8 targeted hooks...")
 
         try {
-            val activityClass = Activity::class.java
+            val classLoader = param.classLoader
+            val targetActivityClass = findClassOrNull(classLoader, TARGET_ACTIVITY)
 
-            // 1. 在画板页面激活/挂起时绑定/解绑手写笔工具切换接收器
-            val onResumeMethod = activityClass.getDeclaredMethod("onResume")
-            onResumeMethod.isAccessible = true
+            if (targetActivityClass != null) {
+                installTargetedHooks(targetActivityClass)
+                log(Log.INFO, TAG, "Gaomon M8 targeted hooks installed on $TARGET_ACTIVITY")
+            } else {
+                // Fallback: 若目标类尚未直接由当前 ClassLoader 加载，则使用基类安全挂钩
+                installFallbackHooks()
+                log(Log.WARN, TAG, "Target activity class not found directly, installed fallback Activity hooks")
+            }
+        } catch (t: Throwable) {
+            log(Log.ERROR, TAG, "Failed to hook StarNote: ${t.message}", t)
+        }
+    }
 
+    private fun findClassOrNull(classLoader: ClassLoader, className: String): Class<*>? {
+        return try {
+            classLoader.loadClass(className)
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private fun findMethodInHierarchy(clazz: Class<*>, methodName: String, vararg paramTypes: Class<*>): Method? {
+        var current: Class<*>? = clazz
+        while (current != null && current != Any::class.java) {
+            try {
+                val m = current.getDeclaredMethod(methodName, *paramTypes)
+                m.isAccessible = true
+                return m
+            } catch (_: NoSuchMethodException) {
+                current = current.superclass
+            }
+        }
+        return null
+    }
+
+    private fun installTargetedHooks(targetClass: Class<*>) {
+        val onResumeMethod = findMethodInHierarchy(targetClass, "onResume")
+        if (onResumeMethod != null) {
             hook(onResumeMethod).intercept { chain ->
                 val result = chain.proceed()
                 val activity = chain.thisObject as? Activity
                 if (activity != null && activity.javaClass.name == TARGET_ACTIVITY) {
-                    log(Log.DEBUG, TAG, "NoteScribbleActivity onResume: binding hook")
                     NoteScribbleHook.onActivityResumed(activity)
                 }
                 result
             }
+        }
 
-            val onPauseMethod = activityClass.getDeclaredMethod("onPause")
-            onPauseMethod.isAccessible = true
-
+        val onPauseMethod = findMethodInHierarchy(targetClass, "onPause")
+        if (onPauseMethod != null) {
             hook(onPauseMethod).intercept { chain ->
                 val activity = chain.thisObject as? Activity
                 if (activity != null && activity.javaClass.name == TARGET_ACTIVITY) {
-                    log(Log.DEBUG, TAG, "NoteScribbleActivity onPause: unbinding hook")
                     NoteScribbleHook.onActivityPaused(activity)
                 }
                 chain.proceed()
             }
+        }
 
-            // 2. 拦截并丢弃笔上侧键硬件映射的 KEYCODE_E，防止其在笔记文本框中误打出字母 'e'
-            val dispatchKeyEventMethod = activityClass.getDeclaredMethod("dispatchKeyEvent", android.view.KeyEvent::class.java)
-            dispatchKeyEventMethod.isAccessible = true
-
+        val dispatchKeyEventMethod = findMethodInHierarchy(targetClass, "dispatchKeyEvent", KeyEvent::class.java)
+        if (dispatchKeyEventMethod != null) {
             hook(dispatchKeyEventMethod).intercept { chain ->
                 val activity = chain.thisObject as? Activity
                 if (activity != null && activity.javaClass.name == TARGET_ACTIVITY) {
-                    val event = chain.args[0] as? android.view.KeyEvent
-                    if (event != null && event.keyCode == android.view.KeyEvent.KEYCODE_E) {
+                    val event = chain.args[0] as? KeyEvent
+                    if (event != null && event.keyCode == KeyEvent.KEYCODE_E) {
                         val deviceName = event.device?.name?.lowercase() ?: ""
                         if (deviceName.contains("gaomon") || deviceName.contains("tablet") || deviceName.contains("m8")) {
                             return@intercept true
@@ -81,10 +115,44 @@ class GaomonXposedModule : XposedModule() {
                 }
                 chain.proceed()
             }
+        }
+    }
 
-            log(Log.INFO, TAG, "Gaomon M8 hooks installed successfully into StarNote!")
-        } catch (t: Throwable) {
-            log(Log.ERROR, TAG, "Failed to hook StarNote: ${t.message}", t)
+    private fun installFallbackHooks() {
+        val activityClass = Activity::class.java
+
+        val onResumeMethod = activityClass.getDeclaredMethod("onResume").apply { isAccessible = true }
+        hook(onResumeMethod).intercept { chain ->
+            val result = chain.proceed()
+            val activity = chain.thisObject as? Activity
+            if (activity != null && activity.javaClass.name == TARGET_ACTIVITY) {
+                NoteScribbleHook.onActivityResumed(activity)
+            }
+            result
+        }
+
+        val onPauseMethod = activityClass.getDeclaredMethod("onPause").apply { isAccessible = true }
+        hook(onPauseMethod).intercept { chain ->
+            val activity = chain.thisObject as? Activity
+            if (activity != null && activity.javaClass.name == TARGET_ACTIVITY) {
+                NoteScribbleHook.onActivityPaused(activity)
+            }
+            chain.proceed()
+        }
+
+        val dispatchKeyEventMethod = activityClass.getDeclaredMethod("dispatchKeyEvent", KeyEvent::class.java).apply { isAccessible = true }
+        hook(dispatchKeyEventMethod).intercept { chain ->
+            val activity = chain.thisObject as? Activity
+            if (activity != null && activity.javaClass.name == TARGET_ACTIVITY) {
+                val event = chain.args[0] as? KeyEvent
+                if (event != null && event.keyCode == KeyEvent.KEYCODE_E) {
+                    val deviceName = event.device?.name?.lowercase() ?: ""
+                    if (deviceName.contains("gaomon") || deviceName.contains("tablet") || deviceName.contains("m8")) {
+                        return@intercept true
+                    }
+                }
+            }
+            chain.proceed()
         }
     }
 }

@@ -5,11 +5,12 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.os.Build
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
+import androidx.core.content.ContextCompat
 import java.lang.ref.WeakReference
+import java.util.concurrent.ConcurrentHashMap
 
 object NoteScribbleHook {
     private const val TAG = "GaomonM8Hook"
@@ -17,6 +18,10 @@ object NoteScribbleHook {
     const val EXTRA_CMD = "cmd"
 
     private var activeActivityRef: WeakReference<Activity>? = null
+
+    // 缓存工具名称（如 "ERASER", "INK_PEN", "LASSO" 等）到对应的 View
+    private val toolViewCache = ConcurrentHashMap<String, WeakReference<View>>()
+    private var toolContainerRef: WeakReference<ViewGroup>? = null
 
     private val commandReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -38,13 +43,15 @@ object NoteScribbleHook {
 
     fun onActivityResumed(activity: Activity) {
         activeActivityRef = WeakReference(activity)
+        clearCaches()
         try {
             val filter = IntentFilter(ACTION_COMMAND)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                activity.registerReceiver(commandReceiver, filter, Context.RECEIVER_EXPORTED)
-            } else {
-                activity.registerReceiver(commandReceiver, filter)
-            }
+            ContextCompat.registerReceiver(
+                activity,
+                commandReceiver,
+                filter,
+                ContextCompat.RECEIVER_EXPORTED
+            )
             Log.i(TAG, "Registered Gaomon command receiver in StarNote")
             try {
                 val notifyIntent = Intent("com.gaomon.m8.ACTION_HOOK_ACTIVE")
@@ -59,10 +66,16 @@ object NoteScribbleHook {
         if (activeActivityRef?.get() == activity) {
             activeActivityRef = null
         }
+        clearCaches()
         try {
             activity.unregisterReceiver(commandReceiver)
             Log.i(TAG, "Unregistered Gaomon command receiver from StarNote")
-        } catch (ignored: Throwable) {}
+        } catch (_: Throwable) {}
+    }
+
+    private fun clearCaches() {
+        toolViewCache.clear()
+        toolContainerRef = null
     }
 
     private fun handleCommand(activity: Activity, cmd: String) {
@@ -93,7 +106,7 @@ object NoteScribbleHook {
                 try {
                     val entry = child.resources.getResourceEntryName(child.id)
                     if (entry == targetName) return child
-                } catch (ignored: Throwable) {}
+                } catch (_: Throwable) {}
             }
             if (child is ViewGroup) {
                 val found = findViewRecursively(child, targetName)
@@ -104,11 +117,36 @@ object NoteScribbleHook {
     }
 
     private fun getToolContainer(activity: Activity): ViewGroup? {
-        return findViewByName(activity, "ll_shape_tool_container") as? ViewGroup
+        toolContainerRef?.get()?.let { return it }
+        val container = findViewByName(activity, "ll_shape_tool_container") as? ViewGroup
+        if (container != null) {
+            toolContainerRef = WeakReference(container)
+        }
+        return container
     }
 
+    /**
+     * 工具选择核心逻辑：
+     * 1. 快路径：检查是否已缓存该工具 View
+     * 2. 慢路径：遍历容器中的每个 View，基于运行时对象的实际 Enum 类型进行鲁棒比对（兼容混淆）
+     */
     private fun selectToolByEnumName(activity: Activity, vararg targetEnumNames: String): Boolean {
+        // 1. 快路径：直接从缓存中获取 View
+        for (target in targetEnumNames) {
+            val upperTarget = target.uppercase()
+            val cachedView = toolViewCache[upperTarget]?.get()
+            if (cachedView != null && cachedView.isAttachedToWindow) {
+                cachedView.performClick()
+                Log.d(TAG, "Fast-path: selected tool $upperTarget")
+                return true
+            }
+        }
+
+        // 2. 慢路径：遍历容器子 View 并缓存所有识别到的工具
         val container = getToolContainer(activity) ?: return false
+        var targetFoundView: View? = null
+        var foundEnumName: String? = null
+
         for (i in 0 until container.childCount) {
             val child = container.getChildAt(i)
             try {
@@ -118,18 +156,25 @@ object NoteScribbleHook {
                         field.isAccessible = true
                         val value = field.get(child)
                         if (value != null && (value is Enum<*> || value.javaClass.isEnum)) {
-                            val enumName = value.toString()
-                            if (targetEnumNames.any { enumName.equals(it, ignoreCase = true) }) {
-                                child.performClick()
-                                Log.d(TAG, "Selected tool $enumName (child $i)")
-                                return true
+                            val enumName = value.toString().uppercase()
+                            toolViewCache[enumName] = WeakReference(child)
+                            if (targetFoundView == null && targetEnumNames.any { it.equals(enumName, ignoreCase = true) }) {
+                                targetFoundView = child
+                                foundEnumName = enumName
                             }
                         }
                     }
                     clazz = clazz.superclass
                 }
-            } catch (ignored: Throwable) {}
+            } catch (_: Throwable) {}
         }
+
+        if (targetFoundView != null) {
+            targetFoundView.performClick()
+            Log.d(TAG, "Cold-path: selected tool $foundEnumName and populated cache")
+            return true
+        }
+
         return false
     }
 
@@ -155,25 +200,6 @@ object NoteScribbleHook {
             val container = getToolContainer(activity) ?: return
             if (container.childCount > 4) container.getChildAt(4).performClick()
         }
-    }
-
-    private fun isToolSelected(child: View): Boolean {
-        if (child.isSelected) return true
-        try {
-            var clazz: Class<*>? = child.javaClass
-            while (clazz != null && clazz.name != "android.view.View") {
-                for (field in clazz.declaredFields) {
-                    if (field.type == Boolean::class.javaPrimitiveType) {
-                        field.isAccessible = true
-                        val value = field.getBoolean(child)
-                        // StarNote ShapeIconView uses obfuscated field 't' for selection state
-                        if (field.name == "t" && value) return true
-                    }
-                }
-                clazz = clazz.superclass
-            }
-        } catch (ignored: Throwable) {}
-        return false
     }
 
     private fun onEraserHoldDown(activity: Activity) {

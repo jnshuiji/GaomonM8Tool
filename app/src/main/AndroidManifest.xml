@@ -3,12 +3,14 @@
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!-- Android 14+ (API 34+) 要求 foregroundServiceType="connectedDevice" 必须伴随特定权限才能启动前台服务。
+         为 USB HID 数位板守护进程使用 Normal 权限 CHANGE_NETWORK_STATE 以满足系统契约并防止 SecurityException。 -->
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".App"
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@android:drawable/ic_menu_edit"
         android:label="@string/app_name"
         android:roundIcon="@android:drawable/ic_menu_edit"

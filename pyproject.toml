@@ -1,0 +1,14 @@
+[project]
+name = "gaomon-m8-toolchain"
+version = "0.1.0"
+description = "Engineering dev environment & automation toolchain for Gaomon M8 Tool"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "adbutils>=2.9.0",
+    "rich>=13.9.0",
+    "click>=8.1.7",
+]
+
+[tool.uv]
+package = false

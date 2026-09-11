@@ -1,6 +1,6 @@
 plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
 }
 
 android {
@@ -11,8 +11,8 @@ android {
         applicationId = "com.gaomon.m8"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -53,16 +53,24 @@ android {
 
 dependencies {
     // Modern LibXposed API 102 & Service
-    compileOnly("io.github.libxposed:api:102.0.0")
-    implementation("io.github.libxposed:service:102.0.0")
+    compileOnly(libs.libxposed.api)
+    implementation(libs.libxposed.service)
 
-    implementation("androidx.core:core-ktx:1.15.0")
-    implementation("androidx.appcompat:appcompat:1.7.0")
-    implementation("com.google.android.material:material:1.12.0")
-    implementation("androidx.constraintlayout:constraintlayout:2.2.0")
-    implementation("androidx.recyclerview:recyclerview:1.3.2")
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.appcompat)
+    implementation(libs.material)
+    implementation(libs.androidx.constraintlayout)
+    implementation(libs.androidx.recyclerview)
+    implementation(libs.androidx.lifecycle.viewmodel.ktx)
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.activity.ktx)
+
+    // Unit Testing
+    testImplementation(libs.junit)
 }
 
-tasks.withType<com.android.build.gradle.internal.tasks.CheckAarMetadataTask> {
+// LibXposed 102.0.0 的 AAR metadata 超前声明了 minCompileSdk=37，而当前稳定 SDK 最高为 35。
+// 使用标准的 Task 名称匹配跳过该元数据检查，彻底消除对 AGP internal 私有类的依赖，避免升级插件时 ClassNotFound 崩溃。
+tasks.matching { it.name.contains("AarMetadata", ignoreCase = true) }.configureEach {
     enabled = false
 }

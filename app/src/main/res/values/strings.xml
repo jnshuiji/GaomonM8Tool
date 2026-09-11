@@ -1,9 +1,43 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">高漫 M8 驱动工具</string>
+    <string name="app_title">高漫 M8 压感笔适配工具</string>
     <string name="xposed_description">高漫 M8 数位板 StarNote 画板底层原生驱动与快捷键增强模块</string>
-    <string name="status_connected">数位板已连接 (M8)</string>
-    <string name="status_disconnected">未检测到数位板</string>
-    <string name="service_running">守护服务运行中</string>
-    <string name="service_stopped">守护服务已停止</string>
+
+    <!-- 运行状态卡片 -->
+    <string name="title_running_status">运行状态</string>
+    <string name="status_root_checking">Root 权限: 检测中...</string>
+    <string name="status_root_granted">Root 权限: 已获取</string>
+    <string name="status_root_denied">Root 权限: 未获取</string>
+
+    <string name="status_device_checking">硬件状态: 检测中...</string>
+    <string name="status_device_connected_format">硬件状态: 已连接 (%s)</string>
+    <string name="status_device_connected">硬件状态: 已连接</string>
+    <string name="status_device_disconnected">硬件状态: 未连接</string>
+
+    <string name="status_lsposed_checking">LSPosed 模块: 检测中...</string>
+    <string name="status_lsposed_active">LSPosed 模块: 已激活</string>
+    <string name="status_lsposed_inactive">LSPosed 模块: 未激活</string>
+
+    <!-- 手写笔侧键设置 -->
+    <string name="title_pen_settings">手写笔侧键设置</string>
+    <string name="label_pen_lower">下侧键:</string>
+    <string name="label_pen_upper">上侧键:</string>
+
+    <!-- 动作选项 -->
+    <string name="action_none">无操作</string>
+    <string name="action_eraser_hold">按住切橡皮松开回画笔</string>
+    <string name="action_pen">画笔</string>
+    <string name="action_eraser">橡皮擦</string>
+    <string name="action_lasso">套索</string>
+
+    <!-- 系统体验增强 -->
+    <string name="title_system_enhancement">系统体验增强</string>
+    <string name="label_keep_virtual_keyboard">数位板连接时保持虚拟键盘弹出</string>
+
+    <!-- 前台服务 -->
+    <string name="service_running">高漫 M8 驱动守护中</string>
+    <string name="service_stopped">高漫 M8 驱动已停止</string>
+    <string name="service_notification_channel">高漫 M8 驱动常驻服务</string>
+    <string name="service_notification_text">正在监听手写笔按键</string>
 </resources>

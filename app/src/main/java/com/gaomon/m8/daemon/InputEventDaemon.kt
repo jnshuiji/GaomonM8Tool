@@ -8,6 +8,7 @@ import com.gaomon.m8.model.KeyConfig
 import com.gaomon.m8.xposed.NoteScribbleHook
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.util.concurrent.CopyOnWriteArraySet
 
 class InputEventDaemon(private val context: Context) {
 
@@ -20,7 +21,9 @@ class InputEventDaemon(private val context: Context) {
     private var isRunning = false
     private var workerThread: Thread? = null
     private var suProcess: Process? = null
+    private var currentReader: BufferedReader? = null
     private val keyConfig = KeyConfig(context)
+    private val gaomonNodes = CopyOnWriteArraySet<String>()
 
     fun start() {
         if (isRunning) return
@@ -35,30 +38,60 @@ class InputEventDaemon(private val context: Context) {
     fun stop() {
         isRunning = false
         try {
+            currentReader?.close()
+        } catch (_: Throwable) {}
+        try {
             suProcess?.destroy()
-        } catch (ignored: Throwable) {}
+        } catch (_: Throwable) {}
         workerThread?.interrupt()
         workerThread = null
+        currentReader = null
+        suProcess = null
         Log.i(TAG, "Gaomon M8 stylus daemon stopped")
     }
 
+    private fun refreshGaomonNodes() {
+        try {
+            val process = ProcessBuilder("su", "-c", "cat /proc/bus/input/devices").start()
+            val output = process.inputStream.bufferedReader().readText()
+            process.waitFor()
+            val nodes = DeviceProcParser.parseGaomonEventNodes(output)
+            if (nodes.isNotEmpty()) {
+                gaomonNodes.clear()
+                gaomonNodes.addAll(nodes)
+                Log.i(TAG, "Detected Gaomon M8 input event nodes: $nodes")
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "Failed to inspect /proc/bus/input/devices: ${t.message}")
+        }
+    }
+
     private fun runLoop() {
+        refreshGaomonNodes()
+
         while (isRunning) {
+            var reader: BufferedReader? = null
+            var process: Process? = null
             try {
+                val imeSetting = if (keyConfig.autoShowIme) "1" else "0"
                 val cmd = arrayOf(
                     "su", "-c",
-                    "settings put secure show_ime_with_hard_keyboard 1; getevent -l"
+                    "settings put secure show_ime_with_hard_keyboard $imeSetting; getevent -l"
                 )
-                val process = Runtime.getRuntime().exec(cmd)
+                process = Runtime.getRuntime().exec(cmd)
                 suProcess = process
 
-                val reader = BufferedReader(InputStreamReader(process.inputStream))
+                reader = BufferedReader(InputStreamReader(process.inputStream))
+                currentReader = reader
+
                 var ctrlHeld = false
                 var currentLine = reader.readLine()
 
                 while (isRunning && currentLine != null) {
-                    // 仅监听按键相关的输入事件
-                    if (currentLine.contains("EV_KEY")) {
+                    // 1. 过滤：仅当事件属于 Gaomon 设备时才处理，彻底避免外接物理键盘（如打字输入 'e'）误触
+                    if (currentLine.contains("EV_KEY") &&
+                        DeviceProcParser.isEventFromGaomon(currentLine, gaomonNodes)
+                    ) {
                         handleEventLine(currentLine, ctrlHeld) { newCtrl ->
                             ctrlHeld = newCtrl
                         }
@@ -66,11 +99,16 @@ class InputEventDaemon(private val context: Context) {
                     currentLine = reader.readLine()
                 }
                 process.waitFor()
-            } catch (e: InterruptedException) {
+            } catch (_: InterruptedException) {
                 break
             } catch (t: Throwable) {
-                Log.e(TAG, "Error in stylus daemon loop", t)
-                try { Thread.sleep(2000) } catch (ignored: InterruptedException) {}
+                if (isRunning) {
+                    Log.e(TAG, "Error in stylus daemon loop", t)
+                    try { Thread.sleep(2000) } catch (_: InterruptedException) { break }
+                }
+            } finally {
+                try { reader?.close() } catch (_: Throwable) {}
+                try { process?.destroy() } catch (_: Throwable) {}
             }
         }
     }
