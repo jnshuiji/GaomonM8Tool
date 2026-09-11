@@ -39,3 +39,4 @@ app/build/
 .venv/
 __pycache__/
 *.pyc
+.local/
