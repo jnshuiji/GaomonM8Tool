@@ -178,13 +178,13 @@ def build_deploy(target, release, launch):
         sys.exit(1)
 
     if launch:
-        console.print(f"[bold cyan]>> Launching {PACKAGE_NAME}...[/bold cyan]")
-        run_cmd(["adb", "-s", dev, "shell", "am", "force-stop", PACKAGE_NAME])
+        console.print(f"[bold cyan]>> Restarting {STAR_NOTE_PACKAGE} to reload module...[/bold cyan]")
+        run_cmd(["adb", "-s", dev, "shell", "am", "force-stop", STAR_NOTE_PACKAGE])
         run_cmd([
             "adb", "-s", dev, "shell", "am", "start",
-            "-n", f"{PACKAGE_NAME}/.ui.MainActivity"
+            "-n", f"{STAR_NOTE_PACKAGE}/.settings.ui.SettingsActivity"
         ])
-        console.print("[bold green][OK] App launched on tablet.[/bold green]")
+        console.print("[bold green][OK] StarNote Settings opened on tablet.[/bold green]")
 
 
 @cli.command("screen")
@@ -270,6 +270,69 @@ def test_action(action, target):
         console.print(f"[bold green][OK] Command '{action}' sent successfully.[/bold green]")
     else:
         console.print(f"[bold red][FAIL] Failed to send broadcast: {res.stderr if res else ''}[/bold red]")
+
+
+@cli.command("open-settings")
+@click.option("--target", default=DEFAULT_DEVICE, help="ADB target IP:port")
+def open_settings(target):
+    """Launch StarNote settings activity to test embedded Gaomon M8 settings card."""
+    dev = get_adb_device(target)
+    if not dev:
+        console.print("[bold red][FAIL] No ADB device available.[/bold red]")
+        sys.exit(1)
+
+    console.print(f"[bold cyan]>> Opening StarNote Settings on {dev}...[/bold cyan]")
+    run_cmd([
+        "adb", "-s", dev, "shell", "su", "-c",
+        f"am start -n {STAR_NOTE_PACKAGE}/.settings.ui.SettingsActivity"
+    ])
+    console.print("[bold green][OK] StarNote Settings opened.[/bold green]")
+
+
+@cli.command("lsp-log")
+@click.option("--target", default=DEFAULT_DEVICE, help="ADB target IP:port")
+@click.option("-n", "--lines", default=60, help="Number of log lines to show")
+def lsp_log(target, lines):
+    """Read recent LSPosed framework and Gaomon hook logs from device."""
+    dev = get_adb_device(target)
+    if not dev:
+        console.print("[bold red][FAIL] No ADB device available.[/bold red]")
+        sys.exit(1)
+
+    file_res = run_cmd(["adb", "-s", dev, "shell", "su", "-c", "ls -t /data/adb/lspd/log/modules_*.log"])
+    if not file_res or not file_res.stdout.strip():
+        console.print("[bold red][FAIL] Could not list LSPosed logs.[/bold red]")
+        return
+    newest_file = file_res.stdout.splitlines()[0].strip()
+    res = run_cmd(["adb", "-s", dev, "shell", "su", "-c", f"tail -n {lines} {newest_file}"])
+    if res and res.stdout:
+        console.print(f"[bold cyan]>> Recent LSPosed Logs from {newest_file}:[/bold cyan]")
+        for line in res.stdout.splitlines():
+            if "Gaomon" in line:
+                console.print(f"[bold green]{line}[/bold green]")
+            elif "E/" in line or "Error" in line:
+                console.print(f"[bold red]{line}[/bold red]")
+            else:
+                console.print(f"[dim]{line}[/dim]")
+    else:
+        console.print("[bold red][FAIL] Could not read LSPosed logs.[/bold red]")
+
+
+@cli.command("screenshot")
+@click.argument("output_name", default="screenshot.png")
+@click.option("--target", default=DEFAULT_DEVICE, help="ADB target IP:port")
+def screenshot(output_name, target):
+    """Take device screenshot and save to specified local path."""
+    dev = get_adb_device(target)
+    if not dev:
+        console.print("[bold red][FAIL] No ADB device available.[/bold red]")
+        sys.exit(1)
+
+    remote_path = "/sdcard/screen.png"
+    run_cmd(["adb", "-s", dev, "shell", "screencap", "-p", remote_path])
+    out_path = Path(output_name).resolve()
+    run_cmd(["adb", "-s", dev, "pull", remote_path, str(out_path)])
+    console.print(f"[bold green][OK] Screenshot saved to {out_path}[/bold green]")
 
 
 @cli.command("restart-note")

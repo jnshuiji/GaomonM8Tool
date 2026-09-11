@@ -9,6 +9,7 @@ import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import androidx.core.content.ContextCompat
+import com.gaomon.m8.model.ActionType
 import java.lang.ref.WeakReference
 import java.util.concurrent.ConcurrentHashMap
 
@@ -22,6 +23,7 @@ object NoteScribbleHook {
     // 缓存工具名称（如 "ERASER", "INK_PEN", "LASSO" 等）到对应的 View
     private val toolViewCache = ConcurrentHashMap<String, WeakReference<View>>()
     private var toolContainerRef: WeakReference<ViewGroup>? = null
+    private var previousToolViewRef: WeakReference<View>? = null
 
     private val commandReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -42,6 +44,7 @@ object NoteScribbleHook {
     }
 
     fun onActivityResumed(activity: Activity) {
+        if (activeActivityRef?.get() == activity) return
         activeActivityRef = WeakReference(activity)
         clearCaches()
         try {
@@ -76,6 +79,7 @@ object NoteScribbleHook {
     private fun clearCaches() {
         toolViewCache.clear()
         toolContainerRef = null
+        previousToolViewRef = null
     }
 
     private fun handleCommand(activity: Activity, cmd: String) {
@@ -178,7 +182,19 @@ object NoteScribbleHook {
         return false
     }
 
-    private fun selectEraser(activity: Activity) {
+    fun executeAction(activity: Activity, action: ActionType, isDown: Boolean) {
+        when (action) {
+            ActionType.TOGGLE_ERASER_HOLD -> {
+                if (isDown) onEraserHoldDown(activity) else onEraserHoldUp(activity)
+            }
+            ActionType.SELECT_PEN -> if (isDown) selectPen(activity)
+            ActionType.SELECT_ERASER -> if (isDown) selectEraser(activity)
+            ActionType.SELECT_LASSO -> if (isDown) selectLasso(activity)
+            ActionType.NONE -> {}
+        }
+    }
+
+    fun selectEraser(activity: Activity) {
         val success = selectToolByEnumName(activity, "ERASER")
         if (!success) {
             val container = getToolContainer(activity) ?: return
@@ -186,7 +202,7 @@ object NoteScribbleHook {
         }
     }
 
-    private fun selectPen(activity: Activity) {
+    fun selectPen(activity: Activity) {
         val success = selectToolByEnumName(activity, "INK_PEN", "MARKER_PEN", "BALL_PEN", "PENCIL", "BRUSH_PEN", "PEN")
         if (!success) {
             val container = getToolContainer(activity) ?: return
@@ -194,7 +210,7 @@ object NoteScribbleHook {
         }
     }
 
-    private fun selectLasso(activity: Activity) {
+    fun selectLasso(activity: Activity) {
         val success = selectToolByEnumName(activity, "LASSO")
         if (!success) {
             val container = getToolContainer(activity) ?: return
@@ -202,11 +218,71 @@ object NoteScribbleHook {
         }
     }
 
-    private fun onEraserHoldDown(activity: Activity) {
+    private val PEN_ENUM_NAMES = setOf("INK_PEN", "MARKER_PEN", "BALL_PEN", "PENCIL", "BRUSH_PEN", "PEN")
+
+    private fun getToolEnumName(view: View): String? {
+        try {
+            var clazz: Class<*>? = view.javaClass
+            while (clazz != null && clazz.name != "android.view.View") {
+                for (field in clazz.declaredFields) {
+                    field.isAccessible = true
+                    val value = field.get(view)
+                    if (value != null && (value is Enum<*> || value.javaClass.isEnum)) {
+                        return value.toString().uppercase()
+                    }
+                }
+                clazz = clazz.superclass
+            }
+        } catch (_: Throwable) {}
+        return null
+    }
+
+    private fun isToolSelected(child: View): Boolean {
+        if (child.isSelected) return true
+        try {
+            var clazz: Class<*>? = child.javaClass
+            while (clazz != null && clazz.name != "android.view.View") {
+                for (field in clazz.declaredFields) {
+                    if (field.type == Boolean::class.javaPrimitiveType) {
+                        field.isAccessible = true
+                        val value = field.getBoolean(child)
+                        // StarNote ShapeIconView 使用混淆字段 't' 记录选中状态
+                        if (field.name == "t" && value) return true
+                    }
+                }
+                clazz = clazz.superclass
+            }
+        } catch (_: Throwable) {}
+        return false
+    }
+
+    fun onEraserHoldDown(activity: Activity) {
+        val container = getToolContainer(activity)
+        previousToolViewRef = null
+        if (container != null) {
+            for (i in 0 until container.childCount) {
+                val child = container.getChildAt(i)
+                if (isToolSelected(child)) {
+                    val enumName = getToolEnumName(child)
+                    // 仅当先前选中的工具是画笔（钢笔/圆珠笔/毛笔/铅笔等）时才记忆；若为套索等非画笔工具，绝不记忆
+                    if (enumName != null && PEN_ENUM_NAMES.contains(enumName)) {
+                        previousToolViewRef = WeakReference(child)
+                    }
+                    break
+                }
+            }
+        }
         selectEraser(activity)
     }
 
-    private fun onEraserHoldUp(activity: Activity) {
-        selectPen(activity)
+    fun onEraserHoldUp(activity: Activity) {
+        val prev = previousToolViewRef?.get()
+        previousToolViewRef = null
+        if (prev != null && prev.isAttachedToWindow) {
+            prev.performClick()
+        } else {
+            // 先前非画笔工具（如套索）或无缓存时，强制切回标准画笔，严禁回切套索
+            selectPen(activity)
+        }
     }
 }
