@@ -22,14 +22,16 @@ object GaomonSettingsState {
 
     fun initIfNeeded(context: Context) {
         if (!isInitialized) {
-            synchronized(this) {
-                if (!isInitialized) {
-                    val config = KeyConfig(context)
-                    penUpper = config.penUpper
-                    penLower = config.penLower
-                    isInitialized = true
-                }
-            }
+            reload(context)
+        }
+    }
+
+    fun reload(context: Context) {
+        synchronized(this) {
+            val config = KeyConfig(context)
+            penUpper = config.penUpper
+            penLower = config.penLower
+            isInitialized = true
         }
     }
 

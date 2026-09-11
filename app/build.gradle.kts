@@ -11,8 +11,8 @@ android {
         applicationId = "com.gaomon.m8"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "2.0.0"
+        versionCode = 4
+        versionName = "2.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -40,10 +40,6 @@ android {
         jvmTarget = "17"
     }
 
-    buildFeatures {
-        viewBinding = true
-    }
-
     packaging {
         resources {
             merges += "META-INF/xposed/*"
@@ -52,16 +48,11 @@ android {
 }
 
 dependencies {
-    // Modern LibXposed API 102 & Service
+    // Modern LibXposed API 102
     compileOnly(libs.libxposed.api)
-    implementation(libs.libxposed.service)
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
-    implementation(libs.material)
-    implementation(libs.androidx.constraintlayout)
-    implementation(libs.androidx.recyclerview)
-    implementation(libs.androidx.lifecycle.viewmodel.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.ktx)
 

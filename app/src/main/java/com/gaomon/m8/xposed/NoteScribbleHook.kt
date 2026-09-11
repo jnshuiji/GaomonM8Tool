@@ -11,6 +11,7 @@ import android.view.ViewGroup
 import androidx.core.content.ContextCompat
 import com.gaomon.m8.model.ActionType
 import java.lang.ref.WeakReference
+import java.lang.reflect.Field
 import java.util.concurrent.ConcurrentHashMap
 
 object NoteScribbleHook {
@@ -24,6 +25,10 @@ object NoteScribbleHook {
     private val toolViewCache = ConcurrentHashMap<String, WeakReference<View>>()
     private var toolContainerRef: WeakReference<ViewGroup>? = null
     private var previousToolViewRef: WeakReference<View>? = null
+
+    // 静态反射字段缓存，避免每次按键在主线程重复遍历类继承结构与 declaredFields
+    private val classEnumFieldCache = ConcurrentHashMap<Class<*>, Field?>()
+    private val classSelectedFieldCache = ConcurrentHashMap<Class<*>, Field?>()
 
     private val commandReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -134,6 +139,76 @@ object NoteScribbleHook {
      * 1. 快路径：检查是否已缓存该工具 View
      * 2. 慢路径：遍历容器中的每个 View，基于运行时对象的实际 Enum 类型进行鲁棒比对（兼容混淆）
      */
+    private fun findEnumField(clazz: Class<*>, sampleInstance: Any): Field? {
+        return classEnumFieldCache.computeIfAbsent(clazz) {
+            var current: Class<*>? = it
+            while (current != null && current.name != "android.view.View" && current != Any::class.java) {
+                for (field in current.declaredFields) {
+                    try {
+                        field.isAccessible = true
+                        val value = field.get(sampleInstance)
+                        if (value != null && (value is Enum<*> || value.javaClass.isEnum)) {
+                            return@computeIfAbsent field
+                        }
+                    } catch (_: Throwable) {}
+                }
+                current = current.superclass
+            }
+            null
+        }
+    }
+
+    private fun getToolEnumName(view: View): String? {
+        val field = findEnumField(view.javaClass, view) ?: return null
+        return try {
+            val value = field.get(view)
+            if (value != null && (value is Enum<*> || value.javaClass.isEnum)) {
+                value.toString().uppercase()
+            } else null
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private fun findSelectedField(clazz: Class<*>, sampleInstance: Any): Field? {
+        return classSelectedFieldCache.computeIfAbsent(clazz) {
+            var current: Class<*>? = it
+            var candidateField: Field? = null
+            while (current != null && current.name != "android.view.View" && current != Any::class.java) {
+                for (field in current.declaredFields) {
+                    if (field.type == Boolean::class.javaPrimitiveType) {
+                        try {
+                            field.isAccessible = true
+                            if (field.name == "t") {
+                                return@computeIfAbsent field
+                            }
+                            if (candidateField == null) {
+                                candidateField = field
+                            }
+                        } catch (_: Throwable) {}
+                    }
+                }
+                current = current.superclass
+            }
+            candidateField
+        }
+    }
+
+    private fun isToolSelected(child: View): Boolean {
+        if (child.isSelected) return true
+        val field = findSelectedField(child.javaClass, child) ?: return false
+        return try {
+            field.getBoolean(child)
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    /**
+     * 工具选择核心逻辑：
+     * 1. 快路径：检查是否已缓存该工具 View
+     * 2. 慢路径：遍历容器子 View 并基于静态缓存反射提取 Enum 类型
+     */
     private fun selectToolByEnumName(activity: Activity, vararg targetEnumNames: String): Boolean {
         // 1. 快路径：直接从缓存中获取 View
         for (target in targetEnumNames) {
@@ -153,24 +228,14 @@ object NoteScribbleHook {
 
         for (i in 0 until container.childCount) {
             val child = container.getChildAt(i)
-            try {
-                var clazz: Class<*>? = child.javaClass
-                while (clazz != null && clazz.name != "android.view.View") {
-                    for (field in clazz.declaredFields) {
-                        field.isAccessible = true
-                        val value = field.get(child)
-                        if (value != null && (value is Enum<*> || value.javaClass.isEnum)) {
-                            val enumName = value.toString().uppercase()
-                            toolViewCache[enumName] = WeakReference(child)
-                            if (targetFoundView == null && targetEnumNames.any { it.equals(enumName, ignoreCase = true) }) {
-                                targetFoundView = child
-                                foundEnumName = enumName
-                            }
-                        }
-                    }
-                    clazz = clazz.superclass
+            val enumName = getToolEnumName(child)
+            if (enumName != null) {
+                toolViewCache[enumName] = WeakReference(child)
+                if (targetFoundView == null && targetEnumNames.any { it.equals(enumName, ignoreCase = true) }) {
+                    targetFoundView = child
+                    foundEnumName = enumName
                 }
-            } catch (_: Throwable) {}
+            }
         }
 
         if (targetFoundView != null) {
@@ -219,42 +284,6 @@ object NoteScribbleHook {
     }
 
     private val PEN_ENUM_NAMES = setOf("INK_PEN", "MARKER_PEN", "BALL_PEN", "PENCIL", "BRUSH_PEN", "PEN")
-
-    private fun getToolEnumName(view: View): String? {
-        try {
-            var clazz: Class<*>? = view.javaClass
-            while (clazz != null && clazz.name != "android.view.View") {
-                for (field in clazz.declaredFields) {
-                    field.isAccessible = true
-                    val value = field.get(view)
-                    if (value != null && (value is Enum<*> || value.javaClass.isEnum)) {
-                        return value.toString().uppercase()
-                    }
-                }
-                clazz = clazz.superclass
-            }
-        } catch (_: Throwable) {}
-        return null
-    }
-
-    private fun isToolSelected(child: View): Boolean {
-        if (child.isSelected) return true
-        try {
-            var clazz: Class<*>? = child.javaClass
-            while (clazz != null && clazz.name != "android.view.View") {
-                for (field in clazz.declaredFields) {
-                    if (field.type == Boolean::class.javaPrimitiveType) {
-                        field.isAccessible = true
-                        val value = field.getBoolean(child)
-                        // StarNote ShapeIconView 使用混淆字段 't' 记录选中状态
-                        if (field.name == "t" && value) return true
-                    }
-                }
-                clazz = clazz.superclass
-            }
-        } catch (_: Throwable) {}
-        return false
-    }
 
     fun onEraserHoldDown(activity: Activity) {
         val container = getToolContainer(activity)

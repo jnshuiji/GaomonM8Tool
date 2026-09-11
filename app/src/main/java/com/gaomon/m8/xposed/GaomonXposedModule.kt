@@ -31,6 +31,10 @@ class GaomonXposedModule : XposedModule() {
     private var isFragmentHooked = false
     private var isInternalReceiverRegistered = false
 
+    // 触控热路径防重判定时间戳与动作，杜绝双重 Hook 冗余开销
+    private var lastMotionEventTime = -1L
+    private var lastMotionEventAction = -1
+
     override fun onPackageReady(param: PackageReadyParam) {
         GaomonLog.module = this
 
@@ -78,7 +82,7 @@ class GaomonXposedModule : XposedModule() {
                             }
                         }
                         ACTION_CONFIG_CHANGED -> {
-                            ctx?.let { GaomonSettingsState.initIfNeeded(it) }
+                            ctx?.let { GaomonSettingsState.reload(it) }
                         }
                     }
                 }
@@ -309,7 +313,7 @@ class GaomonXposedModule : XposedModule() {
             val event = chain.args[0] as? KeyEvent
 
             if (event != null && event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
-                if (StylusSettingsInjector.handleBackPress()) {
+                if (StylusSettingsInjector.handleBackPress(activity)) {
                     return@intercept true
                 }
             }
@@ -336,7 +340,8 @@ class GaomonXposedModule : XposedModule() {
         try {
             val onBackPressedMethod = activityClass.getDeclaredMethod("onBackPressed").apply { isAccessible = true }
             hook(onBackPressedMethod).intercept { chain ->
-                if (StylusSettingsInjector.handleBackPress()) {
+                val activity = chain.thisObject as? Activity
+                if (StylusSettingsInjector.handleBackPress(activity)) {
                     return@intercept null
                 }
                 chain.proceed()
@@ -367,6 +372,13 @@ class GaomonXposedModule : XposedModule() {
     }
 
     private fun handleStylusMotionEvent(activity: Activity, event: MotionEvent) {
+        // 微秒级热路径事件幂等去重：无论经过子类还是父类 Hook，同一 MotionEvent 单次触控仅处理一次
+        if (event.eventTime == lastMotionEventTime && event.action == lastMotionEventAction) {
+            return
+        }
+        lastMotionEventTime = event.eventTime
+        lastMotionEventAction = event.action
+
         var isStylus = false
         var isEraserTool = false
 
@@ -406,6 +418,8 @@ class GaomonXposedModule : XposedModule() {
         val device = event.device ?: return false
         if (device.vendorId == 0x256C) return true
         val name = device.name?.lowercase() ?: ""
-        return name.contains("gaomon") || name.contains("tablet") || name.contains("m8")
+        // 排除实体物理键盘，避免在画板中输入字母 'e' 时被误当成手写笔侧键拦截
+        if (name.contains("keyboard")) return false
+        return name.contains("gaomon") || (name.contains("m8") && (name.contains("tablet") || name.contains("pen")))
     }
 }

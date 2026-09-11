@@ -13,6 +13,7 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -22,6 +23,8 @@ import com.gaomon.m8.model.ActionType
 import com.gaomon.m8.model.KeyConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.lang.ref.WeakReference
@@ -39,6 +42,12 @@ object StylusSettingsInjector {
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val attachedActivities = java.util.Collections.newSetFromMap(java.util.WeakHashMap<Activity, Boolean>())
+    private val injectorScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var hardwareCheckJob: Job? = null
+
+    // 缓存容器 View ID，避免高频字符串反射解析
+    @Volatile
+    private var cachedContainerId: Int? = null
 
     // 记录当前处于激活状态的主容器与次级选择页，用于返回键处理
     @Volatile
@@ -49,9 +58,10 @@ object StylusSettingsInjector {
     /**
      * 处理系统返回键或返回手势，若次级选择页处于显示状态，则消费该事件并退回主设置列表
      */
-    fun handleBackPress(): Boolean {
+    fun handleBackPress(activity: Activity? = null): Boolean {
         val subpage = currentSubpageRef?.get() ?: return false
         val mainContainer = currentMainContainerRef?.get() ?: return false
+        if (activity != null && subpage.context !== activity) return false
         if (subpage.visibility == View.VISIBLE) {
             subpage.visibility = View.GONE
             mainContainer.visibility = View.VISIBLE
@@ -77,11 +87,29 @@ object StylusSettingsInjector {
             try {
                 if (attachedActivities.contains(activity)) return@post
                 val decor = activity.window?.decorView ?: return@post
-                decor.viewTreeObserver?.addOnGlobalLayoutListener {
-                    try {
-                        findAndInjectContainer(activity)
-                    } catch (_: Throwable) {}
+                val vto = decor.viewTreeObserver ?: return@post
+                val listener = object : ViewTreeObserver.OnGlobalLayoutListener {
+                    override fun onGlobalLayout() {
+                        try {
+                            if (activity.isFinishing || activity.isDestroyed) {
+                                val currentVto = decor.viewTreeObserver
+                                if (currentVto.isAlive) {
+                                    currentVto.removeOnGlobalLayoutListener(this)
+                                }
+                                return
+                            }
+                            val injected = findAndInjectContainer(activity)
+                            if (injected) {
+                                // 注入成功后立即注销监听器，避免在后续布局重算中反复无效触发
+                                val currentVto = decor.viewTreeObserver
+                                if (currentVto.isAlive) {
+                                    currentVto.removeOnGlobalLayoutListener(this)
+                                }
+                            }
+                        } catch (_: Throwable) {}
+                    }
                 }
+                vto.addOnGlobalLayoutListener(listener)
                 attachedActivities.add(activity)
                 GaomonLog.i(TAG, "Registered OnGlobalLayoutListener on ${activity.javaClass.name}")
             } catch (t: Throwable) {
@@ -90,10 +118,15 @@ object StylusSettingsInjector {
         }
     }
 
-    private fun findAndInjectContainer(activity: Activity) {
-        if (activity.isFinishing || activity.isDestroyed) return
+    private fun findAndInjectContainer(activity: Activity): Boolean {
+        if (activity.isFinishing || activity.isDestroyed) return false
 
-        val containerId = activity.resources.getIdentifier(CONTAINER_ID_NAME, "id", activity.packageName)
+        val containerId = cachedContainerId ?: run {
+            val id = activity.resources.getIdentifier(CONTAINER_ID_NAME, "id", activity.packageName)
+            if (id != 0) cachedContainerId = id
+            id
+        }
+
         val container = if (containerId != 0) {
             activity.findViewById<ViewGroup>(containerId)
         } else {
@@ -103,14 +136,14 @@ object StylusSettingsInjector {
 
         if (container == null) {
             GaomonLog.d(TAG, "Container $CONTAINER_ID_NAME not found yet in ${activity.javaClass.name}")
-            return
+            return false
         }
 
-        val fragmentRoot = container.parent as? ViewGroup ?: return
+        val fragmentRoot = container.parent as? ViewGroup ?: return false
 
         // common_device_stylus_container 为 ScrollView，内部承载条目的为其唯一子 View (LinearLayout)
         val targetContainer = if (container is ScrollView) {
-            if (container.childCount == 0) return
+            if (container.childCount == 0) return false
             (container.getChildAt(0) as? ViewGroup) ?: container
         } else {
             container
@@ -121,7 +154,7 @@ object StylusSettingsInjector {
 
         // 避免重复注入主卡片
         if (targetContainer.findViewWithTag<View>(TAG_ROOT_CARD) != null) {
-            return
+            return true
         }
 
         // 确保次级选择页面已准备好
@@ -133,6 +166,7 @@ object StylusSettingsInjector {
         // 插入在第一位（顶层选项）
         targetContainer.addView(cardView, 0)
         GaomonLog.i(TAG, "Successfully injected Gaomon M8 top-level settings card into $CONTAINER_ID_NAME")
+        return true
     }
 
     private fun findViewRecursively(parent: ViewGroup, targetName: String): View? {
@@ -225,8 +259,10 @@ object StylusSettingsInjector {
         )
         fun refreshHardwareStatus() {
             statusValueTv.text = "正在检测..."
-            CoroutineScope(Dispatchers.Main).launch {
+            hardwareCheckJob?.cancel()
+            hardwareCheckJob = injectorScope.launch {
                 val (connected, info) = withContext(Dispatchers.IO) { repo.checkHardwareConnected() }
+                if (activity.isFinishing || activity.isDestroyed) return@launch
                 if (connected) {
                     statusValueTv.text = info
                     statusValueTv.setTextColor(Color.parseColor("#4CAF50"))
